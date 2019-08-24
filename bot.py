@@ -46,30 +46,45 @@ async def get(url, logger=LOGGER):
 
     return response
 
-async def get_status(reply, logger=LOGGER):
+async def get_releases(logger=LOGGER):
     url = "https://shipit-api.mozilla-releng.net/releases"
-    releases = await get(url)
+    return await get(url)
 
+
+def add_release_signoff_status(reply, release):
+    reply = add_a_block(reply, add_section(f"*{release['name']}*"))
+    reply = add_a_block(reply, add_section("Status:"))
+    for phase in release["phases"]:
+        state = "requires signoff"
+        if phase["submitted"]:
+            if phase["completed"]:
+                state = ":white_check_mark:"
+            else:
+                state = ":arrows_counterclockwise:"
+
+        reply = add_a_block(reply, add_section(f"\tPhase: {phase['name']} - {state}"))
+    reply = add_a_block(reply, add_divider())
+
+def add_overall_status(reply, releases, logger=LOGGER):
     # compose message status
     reply = add_a_block(reply, add_section("Releases in-flight:"))
     reply = add_a_block(reply, add_divider())
 
     for release in releases:
-        reply = add_a_block(reply, add_section(f"*{release['name']}*"))
-        reply = add_a_block(reply, add_section("Status:"))
-        for phase in release["phases"]:
-            state = "requires signoff"
-            if phase["submitted"]:
-                if phase["completed"]:
-                    state = ":white_check_mark:"
-                else:
-                    state = ":arrows_counterclockwise:"
+        reply = add_release_signoff_status(reply, release)
+    return reply
 
-            reply = add_a_block(reply, add_section(f"\tPhase: {phase['name']} - {state}"))
-        reply = add_a_block(reply, add_divider())
-    from pprint import pformat
-    logger.info(pformat(reply))
+def add_release_status(reply, release, logger=LOGGER):
+    name = release["name"]
+    reply = add_a_block(reply, add_section("Release {name} status:"))
+    reply = add_release_signoff_status(reply, release)
 
+    for phase in release["phases"]:
+        if phase["actionTaskId"] and not phase["completed"]:
+            pass # TODO get progress of taskcluster groupid
+
+def add_bot_help(reply):
+    return reply # TODO
 
 @slack.RTMClient.run_on(event="message")
 async def receive_message(**payload):
@@ -84,8 +99,18 @@ async def receive_message(**payload):
         "blocks": [],
     }
 
+    releases = await get_releases()
     if "status" == message.lower():
-        reply = get_status(reply, data, web_client)
+        reply = add_overall_status(reply, releases)
+    if "status" in message.lower():
+        for release in releases:
+            if release["name"] in message:
+                reply = add_release_status(reply, release)
+                break
+        else:
+            reply = add_a_block(reply, add_section("No matching release status could be found. See help"))
+            reply = add_a_block(reply, add_divider())
+            reply = add_bot_help(reply)
 
     if reply["channel"] != "ID?": # TODO find out the ID for releaseduty
         LOGGER.error("Can only reply to the #releaseduty channel. Is this bot coming from another channel?")
@@ -100,4 +125,5 @@ if __name__ == "__main__":
 
     # real-time-messaging Slack client
     client = slack.RTMClient(token=TOKEN, run_async=True, loop=loop)
+    loop.run_until_complete(client.start())
     loop.run_until_complete(client.start())
