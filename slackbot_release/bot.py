@@ -1,13 +1,14 @@
 import asyncio
-import aiohttp
+import copy
 import logging
-import json
 import os
 import re
 import sys
-import copy
 
 import slack
+
+from slackbot_release.taskcluster import add_taskcluster_status
+from slackbot_release.shipit import get_releases
 
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
@@ -37,23 +38,7 @@ def expand_slack_payload(**payload):
 
     return data, message, web_client
 
-async def get(url, logger=LOGGER):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                logger.error("Could not complete request. Are you connected to the VPN?")
-                logger.error(f"Failed to GET {response.url}: {response.status}; body={(await response.text())[:1000]}")
-                sys.exit()
-            response = await response.json()
-
-    return response
-
-async def get_releases(logger=LOGGER):
-    url = "https://shipit-api.mozilla-releng.net/releases"
-    return await get(url)
-
-
-def add_release_signoff_status(reply, release, logger=LOGGER):
+def add_signoff_status(reply, release, logger=LOGGER):
     reply = add_a_block(reply, add_section(f"Status: *{release['name']}*"))
     for phase in release["phases"]:
         # strip the product name out of the phase for presenting
@@ -64,7 +49,7 @@ def add_release_signoff_status(reply, release, logger=LOGGER):
             state = ":white_check_mark:"
             tc_url = f"https://taskcluster-ui.herokuapp.com/tasks/{phase['actionTaskId']}"
 
-        reply = add_a_block(reply, add_section(f"    {phase_name} - {state} {tc_url}"))
+        reply = add_a_block(reply, add_section(f"    {phase_name} - {state}\n{tc_url}"))
     reply = add_a_block(reply, add_divider())
     return reply
 
@@ -74,17 +59,20 @@ def add_overall_status(reply, releases, logger=LOGGER):
     reply = add_a_block(reply, add_divider())
 
     for release in releases:
-        reply = add_release_signoff_status(reply, release)
+        reply = add_signoff_status(reply, release)
     return reply
 
 def add_release_status(reply, release, logger=LOGGER):
     name = release["name"]
-    reply = add_a_block(reply, add_section("Release {name} status:"))
-    reply = add_release_signoff_status(reply, release)
+    reply = add_signoff_status(reply, release)
 
+    signed_off_phases = []
     for phase in release["phases"]:
-        if phase["actionTaskId"] and not phase["completed"]:
-            pass # TODO get progress of taskcluster groupid
+        if phase["actionTaskId"] and phase["completed"]:
+            signed_off_phases.append(phase)
+    current_phase = signed_off_phases[-1]  # pop most recent signed off phase
+    taskcluster_status = add_taskcluster_status(current_phase)
+    return reply
 
 def add_bot_help(reply):
     return reply # TODO
@@ -103,9 +91,9 @@ async def receive_message(**payload):
     }
 
     LOGGER.debug(f"message: {message}")
+    # TODO should probably use regex or click to parse commands
     if  message.lower().startswith("shipit"):
         releases = await get_releases()
-        # TODO should probably use regex or click to parse commands
         if "shipit status" == message.lower():
             # overall status
             reply = add_overall_status(reply, releases)
@@ -113,6 +101,9 @@ async def receive_message(**payload):
             # a more detailed specific release status
             for release in releases:
                 if release["name"] in message:
+                    in_progress_reply = copy.deepcopy(reply)
+                    in_progress_reply = add_a_block(reply, add_section(f"Getting Taskcluster status for *{release['name']}*..."))
+                    await web_client.chat_postMessage(**in_progress_reply)
                     reply = add_release_status(reply, release)
                     break
             else:
