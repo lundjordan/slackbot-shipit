@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import json
 import os
 import re
 import sys
@@ -13,12 +14,6 @@ from slackbot_release.shipit import get_releases
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
-
-### configuration
-if "SLACK_API_TOKEN" not in os.environ:
-    LOGGER.critical("bot requires SLACK_API_TOKEN in your ENV")
-    sys.exit()
-TOKEN = os.environ["SLACK_API_TOKEN"]
 
 def add_a_block(message, block_item):
     message = copy.deepcopy(message)
@@ -64,6 +59,7 @@ def add_overall_status(reply, releases, logger=LOGGER):
 
 def add_release_status(reply, release, logger=LOGGER):
     name = release["name"]
+    reply = add_a_block(reply, add_divider())
     reply = add_signoff_status(reply, release)
 
     signed_off_phases = []
@@ -116,10 +112,23 @@ async def receive_message(**payload):
 
 
 if __name__ == "__main__":
+    ### configuration
+    config = {}
+    abs_config_path = os.path.join(
+        os.path.abspath(os.path.join(os.path.realpath(__file__), '..', '..')),
+        "secrets.json"
+    )
+    if not os.path.exists(abs_config_path):
+        LOGGER.critical(f"Couldn't find secret config file. Tried looking in: {abs_config_path}")
+        sys.exit()
+    with open(abs_config_path) as f:
+        config = json.load(f)
+    ###
+
     loop = asyncio.get_event_loop()
     asyncio.set_event_loop(loop)
 
     # real-time-messaging Slack client
-    client = slack.RTMClient(token=TOKEN, run_async=True, loop=loop)
+    client = slack.RTMClient(token=config["slack_api_token"], run_async=True, loop=loop)
     loop.run_until_complete(client.start())
     loop.run_until_complete(client.start())
