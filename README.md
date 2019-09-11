@@ -22,7 +22,7 @@ Background tasks (non interactive):
 
 slackbot-release uses poetry. It's currently not packaged.
 
-```
+```shell
 git clone https://github.com/lundjordan/slackbot-release.git
 cd slackbot-release
 # create your python env. e.g. with pyenv: pyenv virtualenv slackbot-release && pyenv local slackbot-release
