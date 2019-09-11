@@ -21,13 +21,13 @@ Background tasks (non interactive):
 
 ## Hacking
 
-slackbot-release uses poetry. It's currently not packaged.
+slackbot-release was developed with poetry. It's currently not packaged.
 
 ```shell
 git clone https://github.com/lundjordan/slackbot-release.git
 cd slackbot-release
 # create your python env. e.g. with pyenv: pyenv virtualenv slackbot-release && pyenv local slackbot-release
-poetry install
+poetry install # or use pip install directly on the generated pyproject.toml (requires pip >= 19)
 cp secrets.json.template secrets.json  # fill in slack token (ask jlund) and a tc client for inspecting tc groups
 # connect to vpn so you can communicate with shipit
 python slackbot_release/bot.py
