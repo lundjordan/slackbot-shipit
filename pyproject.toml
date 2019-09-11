@@ -7,6 +7,7 @@ authors = ["Jordan Lund <jlund@mozilla.com>"]
 [tool.poetry.dependencies]
 python = "^3.7"
 slackclient = "^2.1"
+taskcluster = "^16.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.0"
