@@ -10,7 +10,7 @@ import slack
 
 from slackbot_release.tc import get_taskcluster_group_status
 from slackbot_release.shipit import get_releases
-from slackbot_release.utils import get_config
+from slackbot_release.utils import get_config, release_in_message
 
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
@@ -177,19 +177,16 @@ async def receive_message(**payload):
 
     LOGGER.debug(f"message: {message}")
     # TODO should probably use regex or click to parse commands
-    if  message.lower().startswith("shipit"):
+    message = message.lower()
+    if  message.startswith("shipit"):
         releases = await get_releases()
-        if "shipit status" == message.lower():
+        if "shipit status" == message:
             # overall status
             reply = add_overall_shipit_status(reply, releases)
-        elif "shipit status" in message.lower() and len(message.split()) == 3:
+        elif "shipit status" in message and len(message.split()) == 3:
             # a more detailed specific release status
             for release in releases:
-                target_release = message.split()[-1].lower() # third arg in message. e.g. "devedition-70.0b5-build1"
-                if target_release in release["name"].lower() and release["product"] not in CONFIG["ignored_products"]:
-                    # this allows for substring matches. e.g. "devedition" would match "devedition-70.0b5-build1"
-                    # downside is if there is a beta and a release in-flight, you would have to be more specific than:
-                    # "firefox"
+                if release_in_message(release, message):
                     in_progress_reply = copy.deepcopy(reply)
                     in_progress_reply = add_a_block(reply, add_section(f"Getting Taskcluster status for *{release['name']}*..."))
                     await web_client.chat_postMessage(**in_progress_reply)
@@ -198,7 +195,7 @@ async def receive_message(**payload):
             else:
                 reply = add_a_block(reply, add_section("No matching release status could be found. Message `shipit help` for usage"))
                 reply = add_a_block(reply, add_divider())
-        elif "shipit help" == message.lower():
+        elif "shipit help" == message:
             reply = add_bot_help(reply)
         else:
             reply = add_a_block(reply, add_section("Sorry, I don't understand. Try messaging `shipit help` for usage"))
