@@ -157,7 +157,6 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
                 )
                 blocked_release_message = await add_detailed_release_status(blocked_release_message, release, only_blocked=True)
                 logger.debug(f"Checking {release['name']} status.")
-                logger.debug(blocked_release_message)
                 if blocked_release_message:
                     await slack_client.chat_postMessage(**blocked_release_message)
         await asyncio.sleep(120)
@@ -175,7 +174,6 @@ async def receive_message(**payload):
         "blocks": [],
     }
 
-    LOGGER.debug(f"message: {message}")
     # TODO should probably use regex or click to parse commands
     message = message.lower()
     if  message.startswith("shipit"):
@@ -186,7 +184,7 @@ async def receive_message(**payload):
         elif "shipit status" in message and len(message.split()) == 3:
             # a more detailed specific release status
             for release in releases:
-                if release_in_message(release, message):
+                if release_in_message(release["name"], release["product"], message, CONFIG):
                     in_progress_reply = copy.deepcopy(reply)
                     in_progress_reply = add_a_block(reply, add_section(f"Getting Taskcluster status for *{release['name']}*..."))
                     await web_client.chat_postMessage(**in_progress_reply)
