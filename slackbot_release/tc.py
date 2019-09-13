@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from collections import namedtuple
 import logging
 import os
@@ -23,9 +24,8 @@ async def get_taskcluster_group_status(graph_id, config, logger=LOGGER):
     }
 
     filtered_tasks = []
-    loop = asyncio.get_running_loop()
 
-    async with taskcluster.aio.createSession(loop=loop) as tc_session:
+    async with aiohttp.ClientSession() as tc_session:
         queue = taskcluster.aio.Queue(options=tc_options, session=tc_session)
         def pagination(y):
             filtered_tasks.extend(y.get('tasks', []))

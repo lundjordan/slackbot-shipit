@@ -4,6 +4,7 @@ import logging
 import json
 import os
 import re
+import signal
 import sys
 
 import slack
@@ -141,7 +142,7 @@ def add_bot_help(reply):
 
 async def periodic_releases_status(config=CONFIG, logger=LOGGER):
     message_template = {
-        "channel": "#releaseduty",
+        "channel": "#releng-notifications",
         "icon_emoji": ":sailboat:",
         "blocks": [],
     }
@@ -159,7 +160,7 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
                 logger.debug(f"Checking {release['name']} status.")
                 if blocked_release_message:
                     await slack_client.chat_postMessage(**blocked_release_message)
-        await asyncio.sleep(120)
+        await asyncio.sleep(300)
 
 @slack.RTMClient.run_on(event="message")
 async def receive_message(**payload):
@@ -209,7 +210,6 @@ if __name__ == "__main__":
 
     # real-time-messaging Slack client
     client = slack.RTMClient(token=CONFIG["slack_api_token"], run_async=True, loop=loop)
-
     # periodically check the taskcluster group status of every release in flight
     periodic_releases_status_task = loop.create_task(periodic_releases_status())
 
