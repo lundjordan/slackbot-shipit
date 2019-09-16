@@ -12,7 +12,7 @@ import taskcluster.aio
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-async def get_taskcluster_group_status(graph_id, config, logger=LOGGER):
+async def get_tc_group_status(graph_id, config, logger=LOGGER):
 
     # reimplements tc-filter.py show_filtered
     tc_options = {

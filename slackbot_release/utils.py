@@ -1,4 +1,5 @@
 import aiohttp
+from collections import namedtuple
 import logging
 import json
 import os
@@ -8,7 +9,16 @@ import sys
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-def release_in_message(release, product, message, config):
+### config
+CONFIG = get_config()
+
+# TODO use persistence for these
+TRACKED_RELEASES = []
+TRACKED_RELEASE = "name, active_phase, threads"
+THREADS = []
+OLD_THREAD = "threadid, tasks"
+
+def release_in_message(release, message, config):
     """
     Searches for release in the string message.
 
@@ -20,20 +30,17 @@ def release_in_message(release, product, message, config):
     __________
     release: str
         the release name
-    product: str
-        the product of the release
     message: str
         the full message
 
     Returns
     _______
     bool
-        True if release in message and product is not in ignored list
+        True if release in message
     """
     target_release = message.split()[-1] # third arg in message. e.g. "devedition-70.0b5-build1"
-    supported_product = product not in config["ignored_products"]
 
-    return target_release in release.lower() and supported_product
+    return target_release in release.lower()
 
 async def get(url, logger=LOGGER):
     async with aiohttp.ClientSession() as session:
@@ -50,7 +57,7 @@ def get_config(logger=LOGGER):
     config = {}
     abs_config_path = os.path.join(
         os.path.abspath(os.path.join(os.path.realpath(__file__), '..', '..')),
-        "secrets.json"
+        "staging_secrets.json"
     )
     if not os.path.exists(abs_config_path):
         LOGGER.critical(f"Couldn't find secret config file. Tried looking in: {abs_config_path}")
