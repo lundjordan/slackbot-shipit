@@ -12,7 +12,7 @@ import slack
 
 from slackbot_release.tc import get_tc_group_status
 from slackbot_release.shipit import get_releases
-from slackbot_release.utils import get_config, release_in_message
+from slackbot_release.utils import get_config, release_in_message, task_tracked, TRACKED_RELEASES
 
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
@@ -42,16 +42,17 @@ def expand_slack_payload(**payload):
 
 def add_signoff_status(reply, release, logger=LOGGER):
     reply = add_a_block(reply, add_section(f"Status: *{release['name']}*"))
-    for phase in release["phases"]:
+    for phase in release["triggered_phases"]:
+        # strip the product name out of the phase for presenting
+        phase_name = re.sub("(_firefox|_thunderbird|_fennec)", "", phase["name"])
+        state = ":white_check_mark:"
+        tc_url = f"https://taskcluster-ui.herokuapp.com/tasks/{phase['groupid']}"
+        reply = add_a_block(reply, add_section(f"* {phase_name} - {state}\n{tc_url}"))
+    for phase in release["untriggered_phases"]:
         # strip the product name out of the phase for presenting
         phase_name = re.sub("(_firefox|_thunderbird|_fennec)", "", phase["name"])
         state = ":passport_control:"
-        tc_url = ""
-        if phase["submitted"] and phase["completed"]:
-            state = ":white_check_mark:"
-            tc_url = f"https://taskcluster-ui.herokuapp.com/tasks/{phase['actionTaskId']}"
-
-        reply = add_a_block(reply, add_section(f"* {phase_name} - {state}\n{tc_url}"))
+        reply = add_a_block(reply, add_section(f"* {phase_name} - {state}"))
     reply = add_a_block(reply, add_divider())
     return reply
 
@@ -60,7 +61,7 @@ def add_overall_shipit_status(reply, releases, logger=LOGGER):
     reply = add_a_block(reply, add_section("Releases in-flight:"))
     reply = add_a_block(reply, add_divider())
 
-    for release in releases:
+    for release in releases.values():
         reply = add_signoff_status(reply, release)
 
     if not releases:
@@ -98,11 +99,7 @@ def add_tc_group_status(reply, group_status):
             reply = add_a_block(reply, add_section(f"    EXCEPTION: {task.label} - {task.worker_type} - https://taskcluster-ui.herokuapp.com/tasks/{task.taskid}"))
     return reply
 
-def add_detailed_release_status(reply, release, tc_group_status, only_stuck=False, config=CONFIG, logger=LOGGER):
-    """
-    only_stuck: if True, return None if the release does not have any stuck (failed or exception) tasks
-    """
-    name = release["name"]
+def add_detailed_release_status(reply, release, tc_group_status, config=CONFIG, logger=LOGGER):
     reply = add_a_block(reply, add_divider())
     reply = add_signoff_status(reply, release)
     reply = add_tc_group_status(reply, tc_group_status)
@@ -140,43 +137,28 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
     while True:
         logger.debug("Checking periodic release status")
         slack_client = slack.WebClient(token=config["slack_api_token"], run_async=True)
-        releases = await get_releases()
-        for release in releases:
+        releases = await get_releases(tracked_releases=TRACKED_RELEASES, config=CONFIG)
+        for release in releases.values():
             stuck_release_message = copy.deepcopy(message_template)
             stuck_release_message = add_a_block(
                 stuck_release_message, add_section(f"@releaseduty - {release['name']} is stuck!")
             )
 
-            current_phase = None
-            for phase in release["phases"]:
-                if phase.get("actionTaskId") and phase.get("completed"):
-                    current_phase = phase
+            tc_group_status = await get_tc_group_status(release["current_phase_groupid"], config)
 
-            tc_group_status = await get_tc_group_status(current_phase["actionTaskId"], config)
-            reporting_stuck_tasks = tc_group_status["failed"] + tc_group_status["exception"]
-            if reporting_stuck_tasks:
-                repeated_stuck_tasks = [] # list of threads
-                for thread in TRACKED_RELEASES[release["name"]]["threads"]:
-                    tracked_thread_tasks = [task.taskid for task in thread.tasks]
-                    for stuck_task in reporting_stuck_tasks:
-                        if stuck_task.taskid in tracked_thread_tasks:
-                            # TODO create temp thread if does not exist, add task to list
-                            # TODO pop task from tc_group_status
-                # TODO for thread in repeated_stuck_threads:
-                    # stuck_release_message["thread"] = thread.threadid
-                    # for task in thread.tasks
-                        #  stuck_release_message = add_a_block(
-                            #  stuck_release_message, add_section(f"TASK")
-                        #  )
-                    # await slack_client.chat_postMessage(**stuck_release_message)
-                # TODO send remaining new stuck tasks as separate message and capture threadid
-                # if any_remaining_reporting_tasks
-                    #  stuck_release_message = add_detailed_release_status(
-                        #  stuck_release_message, release, tc_group_status
-                    #  )
-                    #  response = await slack_client.chat_postMessage(**stuck_release_message)
-                    # TODO create a new thread in TRACKED_RELEASE
-                
+            # strip tasks that have already been reported
+            tc_group_status["failed"] = [task for task in tc_group_status["failed"] if not task_tracked(task.taskid, release["name"])]
+            tc_group_status["exception"] = [task for task in tc_group_status["exception"] if not task_tracked(task.taskid, release["name"])]
+            if tc_group_status["failed"] or tc_group_status["exception"]:
+                stuck_release_message = add_detailed_release_status(
+                    stuck_release_message, release, tc_group_status
+                )
+                response = await slack_client.chat_postMessage(**stuck_release_message)
+                release["slack_threads"] = {
+                    "threadid": response.get("ts"),
+                    "tasks": [t.taskid for t in tc_group_status["failed"] + tc_group_status["exception"]]
+                }
+
         await asyncio.sleep(300)
 
 @slack.RTMClient.run_on(event="message")
@@ -195,23 +177,20 @@ async def receive_message(**payload):
     # TODO should probably use regex or click to parse commands
     message = message.lower()
     if  message.startswith("shipit"):
-        releases = await get_releases()
+        releases = await get_releases(tracked_releases=TRACKED_RELEASES, config=CONFIG)
         if "shipit status" == message:
             # overall status
             reply = add_overall_shipit_status(reply, releases)
         elif "shipit status" in message and len(message.split()) == 3:
             # a more detailed specific release status
-            for release in releases:
+            for release in releases.values():
                 if release_in_message(release["name"], message, CONFIG):
                     in_progress_reply = copy.deepcopy(reply)
                     in_progress_reply = add_a_block(reply, add_section(f"Getting Taskcluster status for *{release['name']}*..."))
                     await web_client.chat_postMessage(**in_progress_reply)
                     current_phase = None
-                    for phase in release["phases"]:
-                        if phase.get("actionTaskId") and phase.get("completed"):
-                            current_phase = phase
-                    tc_group_status = await get_tc_group_status(current_phase["actionTaskId"], config)
-                    reply = add_detailed_release_status(reply, release tc_group_status)
+                    tc_group_status = await get_tc_group_status(release["current_phase_groupid"], config)
+                    reply = add_detailed_release_status(reply, release, tc_group_status)
                     break
             else:
                 reply = add_a_block(reply, add_section("No matching release status could be found. Message `shipit help` for usage"))
@@ -224,16 +203,14 @@ async def receive_message(**payload):
         return await web_client.chat_postMessage(**reply)
 
 
-if __name__ == "__main__":
-    # loooop
-    loop = asyncio.get_event_loop()
-    asyncio.set_event_loop(loop)
-
-
+async def main():
     # real-time-messaging Slack client
-    client = slack.RTMClient(token=CONFIG["slack_api_token"], run_async=True, loop=loop)
+    client = slack.RTMClient(token=CONFIG["slack_api_token"], run_async=True)
     # periodically check the taskcluster group status of every release in flight
-    periodic_releases_status_task = loop.create_task(periodic_releases_status())
+    periodic_releases_status_task = asyncio.create_task(periodic_releases_status())
 
-    loop.run_until_complete(client.start())
-    loop.run_until_complete(periodic_releases_status_task)
+    await asyncio.gather(client.start(), periodic_releases_status_task)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

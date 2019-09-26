@@ -9,14 +9,8 @@ import sys
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-### config
-CONFIG = get_config()
-
-# TODO use persistence for these
-TRACKED_RELEASES = []
-TRACKED_RELEASE = "name, active_phase, threads"
-THREADS = []
-OLD_THREAD = "threadid, tasks"
+# TODO use persistence for this
+TRACKED_RELEASES = {} # key == name of release
 
 def release_in_message(release, message, config):
     """
@@ -52,6 +46,14 @@ async def get(url, logger=LOGGER):
             response = await response.json()
 
     return response
+
+def task_tracked(task, release, tracked_releases=TRACKED_RELEASES):
+    for thread in tracked_releases[release]["threads"]:
+        tracked_thread_tasks = [task.taskid for task in thread.tasks]
+        if task in tracked_thread_tasks:
+            return True
+    return False
+
 
 def get_config(logger=LOGGER):
     config = {}
