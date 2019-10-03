@@ -5,12 +5,12 @@ import json
 import os
 import sys
 
+from slackbot_release.db import TRACKED_RELEASES
+
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-# TODO use persistence for this
-TRACKED_RELEASES = {} # key == name of release
 
 def release_in_message(release, message, config):
     """
@@ -48,9 +48,8 @@ async def get(url, logger=LOGGER):
     return response
 
 def task_tracked(task, release, tracked_releases=TRACKED_RELEASES):
-    for thread in tracked_releases[release]["threads"]:
-        tracked_thread_tasks = [task.taskid for task in thread.tasks]
-        if task in tracked_thread_tasks:
+    for thread in tracked_releases[release]["slack_threads"]:
+        if task in thread["tasks"]:
             return True
     return False
 
@@ -59,7 +58,7 @@ def get_config(logger=LOGGER):
     config = {}
     abs_config_path = os.path.join(
         os.path.abspath(os.path.join(os.path.realpath(__file__), '..', '..')),
-        "staging_secrets.json"
+        "secrets.json"
     )
     if not os.path.exists(abs_config_path):
         LOGGER.critical(f"Couldn't find secret config file. Tried looking in: {abs_config_path}")

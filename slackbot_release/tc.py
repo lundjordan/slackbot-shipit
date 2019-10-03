@@ -12,10 +12,8 @@ import taskcluster.aio
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-async def get_tc_group_status(graph_id, config, logger=LOGGER):
-
-    # reimplements tc-filter.py show_filtered
-    tc_options = {
+def get_tc_config(config):
+    return {
         "rootUrl": config["taskcluster_root_url"],
         "credentials": {
             "clientId": config["taskcluster_client_id"],
@@ -23,10 +21,24 @@ async def get_tc_group_status(graph_id, config, logger=LOGGER):
         },
     }
 
+
+async def task_is_stuck(taskid, config, logger=LOGGER):
+    tc_config = get_tc_config(config)
+    async with aiohttp.ClientSession() as tc_session:
+        queue = taskcluster.aio.Queue(options=tc_config, session=tc_session)
+        status = await queue.status(taskid)
+    return status["status"]["state"] in ["failed", "exception"]
+
+
+async def get_tc_group_status(graph_id, config, logger=LOGGER):
+
+    # reimplements tc-filter.py show_filtered
+    tc_config = get_tc_config(config)
+
     filtered_tasks = []
 
     async with aiohttp.ClientSession() as tc_session:
-        queue = taskcluster.aio.Queue(options=tc_options, session=tc_session)
+        queue = taskcluster.aio.Queue(options=tc_config, session=tc_session)
         def pagination(y):
             filtered_tasks.extend(y.get('tasks', []))
 

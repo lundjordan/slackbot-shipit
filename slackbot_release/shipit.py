@@ -23,7 +23,7 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
                 "version": release["version"],
                 "triggered_phases": [],
                 "untriggered_phases": [],
-                "current_phase_groupid": "",
+                "current_phase": {},
                 "slack_threads": [],
             }
 
@@ -32,7 +32,6 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
         # reset phases and take shipit's current status
         tracked_release["triggered_phases"] = []
         tracked_release["untriggered_phases"] = []
-        tracked_release["current_phase_groupid"] = ""
 
         for phase in release["phases"]:
             tracked_phase = {
@@ -41,10 +40,20 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
             }
             if phase.get("completed"):
                 tracked_release["triggered_phases"].append(tracked_phase)
-                # bug: a phase can be started before previous graph is finished.
-                # slackbot will ignore old phases
-                tracked_release["current_phase_groupid"] = phase["actionTaskId"]
             else:
                 tracked_release["untriggered_phases"].append(tracked_phase)
+
+        # bug: a phase can be started before previous graph is finished.
+        # slackbot will ignore old phases
+        current_phase = tracked_release["triggered_phases"][-1]
+        if tracked_release["current_phase"].get("name") != current_phase["name"]:
+            tracked_release["current_phase"] = {
+                "name": current_phase["name"],
+                "groupid": current_phase["groupid"],
+                "done": False,
+            }
+    from pprint import pformat
+    logger.debug("DEBUG: TRACKED_RELEASES")
+    logger.debug(pformat(tracked_releases))
 
     return tracked_releases
