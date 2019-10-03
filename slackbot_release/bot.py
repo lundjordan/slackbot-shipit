@@ -9,6 +9,7 @@ import signal
 import sys
 
 import slack
+from taskcluster.exceptions import TaskclusterRestFailure
 
 from slackbot_release.tc import get_tc_group_status, task_is_stuck
 from slackbot_release.shipit import get_releases
@@ -22,9 +23,22 @@ LOGGER = logging.getLogger(__name__)
 ### config
 CONFIG = get_config()
 
+async def post_message(text, thread=None, config=CONFIG):
+    message = {
+        "channel": "#releng-notifications",
+        "icon_emoji": ":sailboat:",
+        "text": text,
+    }
+    if thread:
+        message["thread"] = thread
+
+    slack_client = slack.WebClient(token=config["slack_api_token"], run_async=True)
+
+    await slack_client.chat_postMessage(**message)
 
 def add_a_block(message, block_item):
     message = copy.deepcopy(message)
+    message["blocks"] = message.get("blocks", [])
     message["blocks"].append(block_item)
     return message
 
@@ -131,14 +145,8 @@ def add_bot_help(reply):
 
 
 async def periodic_stuck_tasks_status(tracked_releases=TRACKED_RELEASES, config=CONFIG, logger=LOGGER):
-    message_template = {
-        "channel": "#releng-notifications",
-        "icon_emoji": ":sailboat:",
-        "blocks": [],
-    }
     while True:
         logger.debug("Checking all stuck tasks status")
-        slack_client = slack.WebClient(token=config["slack_api_token"], run_async=True)
         for release in tracked_releases:
             for thread in release["slack_threads"]:
                 stuck_tasks = []
@@ -146,12 +154,7 @@ async def periodic_stuck_tasks_status(tracked_releases=TRACKED_RELEASES, config=
                     if task_is_stuck(taskid):
                         stuck_tasks.append(taskid)
                     else:
-                        unstuck_task_message = copy.deepcopy(message_template)
-                        unstuck_task_message["thread"] = thread["threadid"]
-                        unstuck_task_message = add_a_block(
-                            unstuck_task_message, add_section(f"@releaseduty - {taskid} is now green!")
-                        )
-                        await slack_client.chat_postMessage(**unstuck_task_message)
+                        post_message(f"{taskid} is now green!", thread=thread["threadid"])
                 thread["tasks"] = stuck_tasks
             # scrub threads that have no stuck tasks remaining
             release["slack_threads"] = [thread for thread in release["slack_threads"] if thread["tasks"]]
@@ -162,7 +165,6 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
     message_template = {
         "channel": "#releng-notifications",
         "icon_emoji": ":sailboat:",
-        "blocks": [],
     }
     while True:
         logger.debug("Checking all release status")
@@ -170,11 +172,12 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
         tracked_releases = await get_releases(tracked_releases, config=CONFIG)
         for release in tracked_releases.values():
             stuck_release_message = copy.deepcopy(message_template)
-            stuck_release_message = add_a_block(
-                stuck_release_message, add_section(f"@releaseduty - {release['name']} is stuck!")
-            )
 
-            tc_group_status = await get_tc_group_status(release["current_phase"]["groupid"], config)
+            try:
+                tc_group_status = await get_tc_group_status(release["current_phase"]["groupid"], config)
+            except TaskclusterRestFailure as e:
+                post_message(f"@releaseduty - {release['name']} with groupid {release['current_phase']['groupid']} not found")
+                continue  # on to the next release
 
             # strip tasks that have already been reported
             tc_group_status["failed"] = [task for task in tc_group_status["failed"] if not task_tracked(task.taskid, release["name"], tracked_releases)]
@@ -184,6 +187,7 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
                     stuck_release_message, release, tc_group_status
                 )
                 response = await slack_client.chat_postMessage(**stuck_release_message)
+                post_message(f"@releaseduty - {release['name']} is stuck!", thread=response.get("ts"))
                 release["slack_threads"].append({
                     "threadid": response.get("ts"),
                     "tasks": [t.taskid for t in tc_group_status["failed"] + tc_group_status["exception"]]
@@ -197,11 +201,7 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
                         ]) and not release["current_phase"]["done"]:
                 # graph is complete
                 release["current_phase"]["done"] = True
-                graph_complete_message = copy.deepcopy(message_template)
-                graph_complete_message = add_a_block(
-                    graph_complete_message, add_section(f"@releaseduty - {release['name']} phase {release['current_phase']['name']} is complete.")
-                )
-                await slack_client.chat_postMessage(**graph_complete_message)
+                post_message(f"@releaseduty - {release['name']} phase {release['current_phase']['name']} is complete.")
 
         await asyncio.sleep(120)
 
@@ -215,7 +215,6 @@ async def receive_message(tracked_releases=TRACKED_RELEASES, **payload):
         "channel": data["channel"],
         "thread": data["ts"],
         "icon_emoji": ":sailboat:",
-        "blocks": [],
     }
 
     # TODO should probably use regex or click to parse commands
@@ -229,9 +228,7 @@ async def receive_message(tracked_releases=TRACKED_RELEASES, **payload):
             # a more detailed specific release status
             for release in tracked_releases.values():
                 if release_in_message(release["name"], message, CONFIG):
-                    in_progress_reply = copy.deepcopy(reply)
-                    in_progress_reply = add_a_block(reply, add_section(f"Getting Taskcluster status for *{release['name']}*..."))
-                    await web_client.chat_postMessage(**in_progress_reply)
+                    post_message(f"Getting Taskcluster status for *{release['name']}*...")
                     tc_group_status = await get_tc_group_status(release["current_phase"]["groupid"], CONFIG)
                     reply = add_detailed_release_status(reply, release, tc_group_status)
                     break
