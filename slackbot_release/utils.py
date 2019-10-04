@@ -56,15 +56,19 @@ def task_tracked(task, release, tracked_releases=TRACKED_RELEASES):
 
 def get_config(logger=LOGGER):
     config = {}
-    abs_config_path = os.path.join(
-        os.path.abspath(os.path.join(os.path.realpath(__file__), '..', '..')),
-        "secrets.json"
+
+    secret_file = os.environ.get("SLACK_RELEASE_SECRET_CONFIG")
+    assert (secret_file), "SLACK_RELEASE_SECRET_CONFIG must be defined in env"
+
+    abs_secret_file = os.path.join(
+        os.path.abspath(os.path.join(os.path.realpath(__file__), '..', '..')), secret_file
     )
-    if not os.path.exists(abs_config_path):
-        LOGGER.critical(f"Couldn't find secret config file. Tried looking in: {abs_config_path}")
+    if not os.path.exists(abs_secret_file):
+        LOGGER.critical(f"Couldn't find secret config file. Tried looking in: {abs_secret_file}")
         sys.exit()
-    with open(abs_config_path) as f:
+
+    with open(abs_secret_file) as f:
         config = json.load(f)
     config["ignored_products"] = ["thunderbird"]
-    return config
 
+    return config
