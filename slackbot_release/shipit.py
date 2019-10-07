@@ -21,6 +21,8 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
                 "name": release["name"],
                 "product": release["product"],
                 "version": release["version"],
+                "repo": release["project"],
+                "revision": release["revision"],
                 "triggered_phases": [],
                 "untriggered_phases": [],
                 "current_phase": {},
@@ -45,15 +47,13 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
 
         # bug: a phase can be started before previous graph is finished.
         # slackbot will ignore old phases
-        current_phase = tracked_release["triggered_phases"][-1]
-        if tracked_release["current_phase"].get("name") != current_phase["name"]:
-            tracked_release["current_phase"] = {
-                "name": current_phase["name"],
-                "groupid": current_phase["groupid"],
-                "done": False,
-            }
-    from pprint import pformat
-    logger.debug("DEBUG: TRACKED_RELEASES")
-    logger.debug(pformat(tracked_releases))
+        if tracked_release["triggered_phases"]:
+            current_phase = tracked_release["triggered_phases"][-1]
+            if tracked_release["current_phase"].get("name") != current_phase["name"]:
+                tracked_release["current_phase"] = {
+                    "name": current_phase["name"],
+                    "groupid": current_phase["groupid"],
+                    "done": False,
+                }
 
     return tracked_releases
