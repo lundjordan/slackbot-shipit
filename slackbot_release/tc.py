@@ -9,7 +9,7 @@ import taskcluster.aio
 # TODO rip this out as part of a standalone group inspector module. Replace graph-progress.sh and tc-filter.py
 
 ### logging
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 def get_tc_config(config):

@@ -15,10 +15,13 @@ from taskcluster.exceptions import TaskclusterRestFailure
 from slackbot_release.tc import get_tc_group_status, task_is_stuck
 from slackbot_release.shipit import get_releases
 from slackbot_release.utils import get_config, release_in_message, task_tracked
-from slackbot_release.db import TRACKED_RELEASES
+
+
+### temp persistent tracking
+TRACKED_RELEASES = {}
 
 ### logging
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 ### config
@@ -36,11 +39,11 @@ async def post_message(text, thread=None, config=CONFIG):
         "text": text,
     }
     if thread:
-        message["thread"] = thread
+        message["thread_ts"] = thread
 
     slack_client = slack.WebClient(token=config["slack_api_token"], run_async=True)
 
-    LOGGER.debug(message)
+    LOGGER.info(message)
     await slack_client.chat_postMessage(**message)
 
 def add_a_block(message, block_item):
@@ -170,7 +173,9 @@ def add_bot_help(reply):
 
 async def periodic_stuck_tasks_status(tracked_releases=TRACKED_RELEASES, config=CONFIG, logger=LOGGER):
     while True:
-        logger.debug("Checking all stuck tasks status")
+        logger.info("Checking all stuck tasks status")
+        logger.info("XXX stuck tasks tracked_releases")
+        logger.info(tracked_releases)
         for release in tracked_releases:
             for thread in release["slack_threads"]:
                 stuck_tasks = []
@@ -191,8 +196,10 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
         "icon_emoji": ":sailboat:",
     }
     while True:
-        logger.debug("Checking all release status")
         slack_client = slack.WebClient(token=config["slack_api_token"], run_async=True)
+        logger.info("Checking all release status")
+        logger.info("XXX all status tracked_releases")
+        logger.info(tracked_releases)
         tracked_releases = await get_releases(tracked_releases, config=CONFIG)
         for release in tracked_releases.values():
             stuck_release_message = copy.deepcopy(message_template)
@@ -210,11 +217,11 @@ async def periodic_releases_status(tracked_releases=TRACKED_RELEASES, config=CON
             tc_group_status["failed"] = [task for task in tc_group_status["failed"] if not task_tracked(task.taskid, release["name"], tracked_releases)]
             tc_group_status["exception"] = [task for task in tc_group_status["exception"] if not task_tracked(task.taskid, release["name"], tracked_releases)]
             if tc_group_status["failed"] or tc_group_status["exception"]:
+                await post_message(f"releaseduty - {release['name']} is stuck!")
                 stuck_release_message = add_detailed_release_status(
                     stuck_release_message, release, tc_group_status
                 )
                 response = await slack_client.chat_postMessage(**stuck_release_message)
-                await post_message(f"releaseduty - {release['name']} is stuck!", thread=response.get("ts"))
                 release["slack_threads"].append({
                     "threadid": response.get("ts"),
                     "tasks": [t.taskid for t in tc_group_status["failed"] + tc_group_status["exception"]]
@@ -270,6 +277,7 @@ async def receive_message(tracked_releases=TRACKED_RELEASES, **payload):
             reply = add_bot_help(reply)
         else:
             reply = add_a_block(reply, add_section("Sorry, I don't understand. Try messaging `shipit help` for usage"))
+        TRACKED_RELEASES = tracked_releases
 
         return await web_client.chat_postMessage(**reply)
 

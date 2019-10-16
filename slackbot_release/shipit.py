@@ -2,7 +2,7 @@ import logging
 from slackbot_release.utils import get
 
 ### logging
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 async def get_releases(tracked_releases, config, logger=LOGGER):
@@ -55,5 +55,7 @@ async def get_releases(tracked_releases, config, logger=LOGGER):
                     "groupid": current_phase["groupid"],
                     "done": False,
                 }
+    logger.info("XXX get_releases output")
+    logger.info(tracked_releases)
 
     return tracked_releases
