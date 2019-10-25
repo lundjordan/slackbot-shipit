@@ -47,13 +47,6 @@ async def get(url, logger=LOGGER):
 
     return response
 
-def task_tracked(task, release, tracked_releases=TRACKED_RELEASES):
-    for thread in tracked_releases[release]["slack_threads"]:
-        if task in thread["tasks"]:
-            return True
-    return False
-
-
 def get_config(logger=LOGGER):
     config = {}
 
