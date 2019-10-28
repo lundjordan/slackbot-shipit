@@ -1,3 +1,4 @@
+import collections
 from contextlib import contextmanager
 import logging
 
@@ -15,17 +16,19 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 LOGGER = logging.getLogger(__name__)
 
 #### db setup
-engine = create_engine("sqlite:///:memory:", echo=True)
+engine = create_engine("sqlite:///slackbot_release.db", echo=True)
 Session = sessionmaker(bind=engine)
-
 Base = declarative_base()
+
+def create_db():
+    Base.metadata.create_all(engine)
 
 @contextmanager
 def session_scope():
     "use context to manage session lifecycle in transactions"
     session = Session()
     try:
-        yield Session
+        yield session
         session.commit()
     except:
         session.rollback()
@@ -52,9 +55,10 @@ class Phase(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     groupid = Column(String)
+    # triggered tracks if phase was initiated in shipit
     triggered = Column(Boolean)
     done = Column(Boolean)
-    release_id = Column(String, ForeignKey="releases.name")
+    release_id = Column(String, ForeignKey("releases.name"))
 
 
 class SlackThread(Base):
@@ -62,37 +66,44 @@ class SlackThread(Base):
 
     threadid = Column(String, primary_key=True)
     tasks = relationship("Task", cascade="all, delete-orphan")
+    release_id = Column(String, ForeignKey("releases.name"))
 
 
 class Task(Base):
     __tablename__ = "tasks"
 
     taskid = Column(String, primary_key=True)
+    thread_id = Column(String, ForeignKey("slack_threads.threadid"))
+
+NamedRelease = collections.namedtuple('Release', 'name, product, version, repo, revision, phases, slack_threads')
+NamedPhase = collections.namedtuple('Phase', 'name, groupid, triggered, done')
+NamedSlackThread = collections.namedtuple('SlackThread', 'threadid, tasks')
+NamedTask = collections.namedtuple('SlackThread', 'taskid, threadid')
 
 
 def task_tracked(task, release_name):
     with session_scope() as session:
-        release = get_release(release_name)
+        release = session.query(Release).get(release_name)
         for thread in release.slack_threads:
-            if task in thread.tasks:
+            if task in [t.taskid for t in thread.tasks]:
                 return True
         return False
 
 def track_slack_thread(threadid, tasks, release_name):
     with session_scope() as session:
-        release = get_release(release_name)
+        release = session.query(Release).get(release_name)
         thread = SlackThread(threadid=threadid)
-        thread.tasks = [Task(taskid) for taskid in tasks]
+        thread.tasks = [Task(taskid=taskid) for taskid in tasks]
         release.slack_threads.append(thread)
 
 def update_tasks_in_thread(threadid, tasks):
     with session_scope() as session:
-        thread = get_thread(threadid)
-        thread.tasks = [Task(taskid) for taskid in tasks]
+        thread = session.query(SlackThread).get(threadid)
+        thread.tasks = [Task(taskid=taskid) for taskid in tasks]
 
 def mark_phase_as_done(phase_name, release_name):
     with session_scope() as session:
-        release = get_release(release_name)
+        release = session.query(Release).get(release_name)
         target_phase = next(phase for phase in release.phases if phase.name == phase_name)
         target_phase.done = True
 
@@ -110,7 +121,7 @@ def add_release(shipit_release):
             phases.append(Phase(
                 name=shipit_phase["name"],
                 groupid=shipit_phase["actionTaskId"],
-                triggered=shipit_phase["completed"], # triggered tracks if phase was initiated in shipit
+                triggered=True if shipit_phase["completed"] else False,
                 done=False  # done tracks if TC graph is complete
             ))
         new_release.phases = phases
@@ -119,13 +130,13 @@ def add_release(shipit_release):
 
 def update_phases(shipit_release):
     with session_scope() as session:
-        release = get_release(shipit_release["name"])
+        release = session.query(Release).get(shipit_release["name"])
         for phase in release.phases:
             # get corresponding shipit phase which holds live state
             shipit_phase = next(i for i in shipit_release["phases"] if i["name"] == phase.name)
             # update phase live state
             phase.groupid = shipit_phase["actionTaskId"]
-            phase.triggered = shipit_phase["completed"]
+            phase.triggered = True if shipit_phase["completed"] else False
 
 def delete_old_threads(release_name):
     with session_scope() as session:
@@ -138,16 +149,31 @@ def delete_old_releases(shipit_releases):
                 session.delete(release)
 
 def get_releases():
+    releases = []
     with session_scope() as session:
-        return session.query(Release).all()
+        for release in session.query(Release).all():
+            r = NamedRelease(name=release.name,
+                             product=release.product,
+                             version=release.version,
+                             repo=release.repo,
+                             revision=release.repo,
+                             phases=[],
+                             slack_threads=[])
+            for phase in release.phases:
+                r.phases.append(NamedPhase(name=phase.name,
+                                groupid=phase.groupid,
+                                triggered=phase.triggered,
+                                done=phase.done))
+            for thread in release.slack_threads:
+                r.slack_threads.append(
+                    NamedSlackThread(threadid=thread.threadid, tasks=[t.taskid for t in thread.tasks])
+                )
+            releases.append(r)
+        return releases
 
 def get_release(name):
     with session_scope() as session:
         return session.query(Release).get(name)
-
-def get_thread(threadid):
-    with session_scope() as session:
-        return session.query(SlackThread).get(threadid)
 
 async def update_releases(config, logger=LOGGER):
     shipit_releases = await get_shipit_releases(config)

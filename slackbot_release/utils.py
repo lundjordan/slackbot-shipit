@@ -5,8 +5,6 @@ import json
 import os
 import sys
 
-from slackbot_release.db import TRACKED_RELEASES
-
 ### logging
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
