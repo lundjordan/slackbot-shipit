@@ -12,7 +12,7 @@ import urllib.parse
 import slack
 from taskcluster.exceptions import TaskclusterRestFailure
 
-from slackbot_release.tc import get_tc_group_status, task_is_stuck, get_artifact_url
+from slackbot_release.tc import get_tc_group_status, task_is_complete, get_artifact_url
 from slackbot_release.tc import graph_is_complete
 from slackbot_release.utils import get_config, release_in_message
 from slackbot_release.db import update_releases, task_tracked, update_tasks_in_thread
@@ -195,10 +195,10 @@ async def periodic_stuck_tasks_status(config=CONFIG, logger=LOGGER):
             for thread in release.slack_threads:
                 stuck_tasks = []
                 for taskid in thread.tasks:
-                    if task_is_stuck(taskid, config):
-                        stuck_tasks.append(taskid)
-                    else:
+                    if await task_is_complete(taskid, config):
                         await post_message(f"{taskid} is now green!", thread=thread.threadid)
+                    else:
+                        stuck_tasks.append(taskid)
                 update_tasks_in_thread(thread.threadid, stuck_tasks)
             # scrub threads that have no stuck tasks remaining
             delete_old_threads(release.name)
@@ -224,16 +224,17 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
                 try:
                     tc_group_status = await get_tc_group_status(phase.groupid, config)
                 except TaskclusterRestFailure as e:
-                    await post_message(f"releaseduty - {release.name} with groupid {phase.groupid} not found")
+                    await post_message(f"{release.name} with groupid {phase.groupid} not found")
                     continue  # on to the next release
 
                 # strip tasks that have already been reported
+                import pdb; pdb.set_trace()
                 tc_group_status["failed"] = [t for t in tc_group_status["failed"] if not task_tracked(t.taskid, release.name)]
                 tc_group_status["exception"] = [t for t in tc_group_status["exception"] if not task_tracked(t.taskid, release.name)]
 
                 if tc_group_status["failed"] or tc_group_status["exception"]:
 
-                    await post_message(f"releaseduty - {release.name} is stuck!")
+                    await post_message(f"{', '.join(config['releaseduty'])} - {release.name} is stuck!")
                     await slack_client.chat_postMessage(**signoff_status)
                     stuck_release_message = await add_phase_status(
                         stuck_release_message, release, phase.name, tc_group_status
@@ -249,7 +250,7 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
 
                 if graph_is_complete(tc_group_status) and not phase.done:
                     mark_phase_as_done(phase.name, release.name)
-                    await post_message(f"@releaseduty - {release.name} phase {phase.name} is complete.")
+                    await post_message(f"{', '.join(config['releaseduty'])} - {release.name} phase {phase.name} is complete.")
 
         await asyncio.sleep(120)
 
@@ -284,7 +285,7 @@ async def receive_message(**payload):
                             try:
                                 tc_group_status = await get_tc_group_status(phase.groupid, CONFIG)
                             except TaskclusterRestFailure as e:
-                                await post_message(f"releaseduty - {release.name} with groupid {phase.groupid} not found")
+                                await post_message(f"{release.name} with groupid {phase.groupid} not found")
                                 continue  # on to the next phase
                             phase_status = await add_phase_status(reply, release, phase.name, tc_group_status)
                             await web_client.chat_postMessage(**phase_status)

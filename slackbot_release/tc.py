@@ -28,12 +28,12 @@ async def get_artifact_url(taskid, artifact, config):
         return queue.buildUrl('getLatestArtifact', taskid, artifact)
 
 
-async def task_is_stuck(taskid, config, logger=LOGGER):
+async def task_is_complete(taskid, config, logger=LOGGER):
     tc_config = get_tc_config(config)
     async with aiohttp.ClientSession() as tc_session:
         queue = taskcluster.aio.Queue(options=tc_config, session=tc_session)
         status = await queue.status(taskid)
-    return status["status"]["state"] in ["failed", "exception"]
+    return (status["status"].get("resolved")) and (status["status"]["state"] in ["completed"])
 
 
 async def get_tc_group_status(graph_id, config, logger=LOGGER):

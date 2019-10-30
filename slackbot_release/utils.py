@@ -61,5 +61,6 @@ def get_config(logger=LOGGER):
     with open(abs_secret_file) as f:
         config = json.load(f)
     config["ignored_products"] = ["thunderbird"]
+    config["releaseduty"] = ["@jlund", "@mtabara"]
 
     return config
