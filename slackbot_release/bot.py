@@ -202,7 +202,7 @@ async def periodic_stuck_tasks_status(config=CONFIG, logger=LOGGER):
                 update_tasks_in_thread(thread.threadid, stuck_tasks)
             # scrub threads that have no stuck tasks remaining
             delete_old_threads(release.name)
-        await asyncio.sleep(300)
+        await asyncio.sleep(120)
 
 
 async def periodic_releases_status(config=CONFIG, logger=LOGGER):
@@ -252,7 +252,7 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
                     mark_phase_as_done(phase.name, release.name)
                     await post_message(f"{', '.join(config['releaseduty'])} - {release.name} phase {phase.name} is complete.")
 
-        await asyncio.sleep(120)
+        await asyncio.sleep(300)
 
 @slack.RTMClient.run_on(event="message")
 async def receive_message(**payload):
