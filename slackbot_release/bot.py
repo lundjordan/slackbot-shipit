@@ -228,7 +228,6 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
                     continue  # on to the next release
 
                 # strip tasks that have already been reported
-                import pdb; pdb.set_trace()
                 tc_group_status["failed"] = [t for t in tc_group_status["failed"] if not task_tracked(t.taskid, release.name)]
                 tc_group_status["exception"] = [t for t in tc_group_status["exception"] if not task_tracked(t.taskid, release.name)]
 
