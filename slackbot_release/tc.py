@@ -15,10 +15,7 @@ LOGGER = logging.getLogger(__name__)
 def get_tc_config(config):
     return {
         "rootUrl": config["taskcluster_root_url"],
-        "credentials": {
-            "clientId": config["taskcluster_client_id"],
-            "accessToken": config["taskcluster_access_token"],
-        },
+        # credentials are not needed for current read operations
     }
 
 async def get_artifact_url(taskid, artifact, config):
@@ -33,7 +30,7 @@ async def task_is_complete(taskid, config, logger=LOGGER):
     async with aiohttp.ClientSession() as tc_session:
         queue = taskcluster.aio.Queue(options=tc_config, session=tc_session)
         status = await queue.status(taskid)
-    return (status["status"].get("resolved")) and (status["status"]["state"] in ["completed"])
+    return status["status"]["state"] == "completed"
 
 
 async def get_tc_group_status(graph_id, config, logger=LOGGER):

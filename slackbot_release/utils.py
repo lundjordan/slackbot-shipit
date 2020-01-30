@@ -41,7 +41,7 @@ async def get(url, logger=LOGGER):
                 logger.error("Could not complete request. Are you connected to the VPN?")
                 logger.error(f"Failed to GET {response.url}: {response.status}; body={(await response.text())[:1000]}")
                 sys.exit()
-            response = await response.json()
+            response = await response.json(content_type=None)
 
     return response
 

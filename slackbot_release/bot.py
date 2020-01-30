@@ -69,8 +69,9 @@ def expand_slack_payload(**payload):
 
     return data, message, web_client
 
-def add_signoff_status(reply, release, logger=LOGGER):
+def add_signoff_status(reply, release, config=CONFIG, logger=LOGGER):
     reply = add_a_block(reply, add_section(f"Status: *{release.name}*"))
+    taskcluster_root_url = config["taskcluster_root_url"]
     for phase in release.phases:
         phase_name = re.sub("(_firefox|_thunderbird|_fennec)", "", phase.name)
         state = ":passport_control:"
@@ -81,7 +82,7 @@ def add_signoff_status(reply, release, logger=LOGGER):
             state = ":white_check_mark:"
 
             if phase.groupid:
-                tc_button = add_button("Taskcluster", f"https://taskcluster-ui.herokuapp.com/tasks/{phase.groupid}")
+                tc_button = add_button("Taskcluster", f"{taskcluster_root_url}/tasks/{phase.groupid}")
                 if phase.done:
                     graph_status = "complete"
                 else:
@@ -96,13 +97,13 @@ def add_signoff_status(reply, release, logger=LOGGER):
 
     return reply
 
-def add_overall_shipit_status(reply, releases, logger=LOGGER):
+def add_overall_shipit_status(reply, releases, config=CONFIG, logger=LOGGER):
     # compose message status
     reply = add_a_block(reply, add_section("Releases in-flight:"))
     reply = add_a_block(reply, add_divider())
 
     for release in releases:
-        reply = add_signoff_status(reply, release)
+        reply = add_signoff_status(reply, release, config)
 
     if not releases:
         reply = add_a_block(reply, add_section("None!"))
@@ -129,6 +130,7 @@ async def add_tc_group_status(reply, release, phase, group_status, config=CONFIG
     reply = add_a_block(reply, add_section(f"{failed + exception} tasks stuck"))
 
     if failed or exception:
+        taskcluster_root_url = config["taskcluster_root_url"]
         reply = add_a_block(reply, add_section("*Stuck Tasks:*"))
 
         stuck_tasks = group_status["failed"] + group_status["exception"]
@@ -142,7 +144,7 @@ async def add_tc_group_status(reply, release, phase, group_status, config=CONFIG
         for task in stuck_tasks:
             reply = add_a_block(reply, add_section(f"{task.label} - {task.worker_type} - {task.taskid}"))
 
-            tc_button = add_button("Taskcluster", f"https://taskcluster-ui.herokuapp.com/tasks/{task.taskid}")
+            tc_button = add_button("Taskcluster", f"{taskcluster_root_url}/tasks/{task.taskid}")
             tc_log_url = await get_artifact_url(task.taskid, "public/logs/live_backing.log", config)
             tc_log_button = add_button("Taskcluster Log", tc_log_url)
             th_button = add_button("Treeherder",
@@ -216,7 +218,7 @@ async def periodic_releases_status(config=CONFIG, logger=LOGGER):
         releases = await update_releases(config=CONFIG)  # poll and sync with shipit live state
         for release in releases:
             stuck_release_message = copy.deepcopy(message_template)
-            signoff_status = add_signoff_status(stuck_release_message, release)
+            signoff_status = add_signoff_status(stuck_release_message, release, config)
 
             active_phases = [p for p in release.phases if p.triggered and p.groupid and not p.done]
 
@@ -271,13 +273,13 @@ async def receive_message(**payload):
         releases = await update_releases(config=CONFIG)  # poll and sync with shipit live state
         if "shipit status" == message:
             # overall status
-            reply = add_overall_shipit_status(reply, releases)
+            reply = add_overall_shipit_status(reply, releases, config=CONFIG)
             await web_client.chat_postMessage(**reply)
         elif "shipit status" in message and len(message.split()) == 3:
             # a more detailed specific release status
             for release in releases:
                 if release_in_message(release.name, message, CONFIG):
-                    signoff_status = add_signoff_status(reply, release)
+                    signoff_status = add_signoff_status(reply, release, config=CONFIG)
                     await web_client.chat_postMessage(**signoff_status)
                     for phase in release.phases:
                         if phase.groupid and not phase.done:

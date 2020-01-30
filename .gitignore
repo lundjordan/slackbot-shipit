@@ -127,3 +127,6 @@ dmypy.json
 # secret file
 secrets.json
 staging_secrets.json
+
+
+slackbot_release.db

@@ -143,9 +143,10 @@ def delete_old_threads(release_name):
         session.query(SlackThread).filter(not_(SlackThread.tasks.any())).delete(synchronize_session='fetch')
 
 def delete_old_releases(shipit_releases):
+    release_names = [r["name"] for r in shipit_releases]
     with session_scope() as session:
         for release in session.query(Release).all():
-            if not next((i for i in shipit_releases if i["name"] != release.name), False):
+            if release.name not in release_names:
                 session.delete(release)
 
 def get_releases():
@@ -156,7 +157,7 @@ def get_releases():
                              product=release.product,
                              version=release.version,
                              repo=release.repo,
-                             revision=release.repo,
+                             revision=release.revision,
                              phases=[],
                              slack_threads=[])
             for phase in release.phases:
